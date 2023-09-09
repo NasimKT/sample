@@ -1,13 +1,15 @@
+//importing required modules
 const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt'); // For password hashing
 const app = express();
 const port = 3000;
 const validation = require('./validation'); // Import the validation module
+const session = require('express-session');
+
 
 // Connect to MongoDB
-mongoose.connect('mongodb://localhost:27017/mydb', {
+mongoose.connect('mongodb://127.0.0.1:27017/mydb', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
@@ -31,9 +33,10 @@ const UserSchema = new mongoose.Schema({
   email: String,
   password: String,
 });
-
+//accessing collection from db
 const User = mongoose.model('users', UserSchema);
-
+var admin = mongoose.model('admin', UserSchema);
+//setting up view-engine
 app.set('view engine', 'ejs');
 app.use(express.static('public'));
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -44,6 +47,29 @@ app.get('/', (req, res) => {
 
 app.get('/signin', (req, res) => {
   res.render('signin');
+});
+
+app.get('/admin-login', (req, res) => {
+  res.render('admin-login');
+});
+
+app.use(session({
+  secret: 'my_session', // Change this to a strong, random secret
+  resave: false,
+  saveUninitialized: true,
+}));
+
+app.get('/admin', async (req, res) => {
+  try {
+    // Fetch all documents from the database
+    const user = await User.find();
+
+    // Render the EJS template and pass the data
+    res.render('admin', { user });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error fetching users');
+  }
 });
 
 app.post('/login', async (req, res) => {
@@ -71,16 +97,59 @@ app.post('/login', async (req, res) => {
   // Check if the email and password exist in the database
   try {
     const user = await User.findOne({ email: email });
-    if (!user) {
+    if (!user || password !== user.password) {
       emailError = 'Email or password is incorrect';
       return res.render('login', { emailError });
     }
 
-    // Compare the provided password with the hashed password stored in the database
-    const passwordMatch = await bcrypt.compare(password, user.password);
-    if (!passwordMatch) {
+    // Extract the username from the email
+    const username = (email.split('@')[0]).toUpperCase(); // Split by "@" and take the first part as the username
+
+    // Store user information in the session
+    req.session.user = { username, email: user.email }; // Store both username and email in the session
+
+    res.redirect('/home');
+  } catch (error) {
+    console.error(error);
+    // Handle database error
+    return res.status(500).send('Internal Server Error');
+  }
+});
+
+
+app.post('/admin-login', async (req, res) => {
+  const { email, password } = req.body;
+
+  let emailError = '';
+  let passwordError = '';
+
+  // Check if the username is a valid email using the validateEmail function from the validation module
+  if (!validation.validateEmail(email)) {
+    emailError = 'Invalid email address';
+  }
+
+  // Validate the password using the isPasswordValid function from the validation module
+  const passwordValidationResult = validation.isPasswordValid(password);
+  if (passwordValidationResult) {
+    passwordError = passwordValidationResult;
+  }
+
+  // If there are errors, render the login page with the error messages
+  if (emailError || passwordError) {
+    return res.render('admin-login', { emailError, passwordError });
+  }
+
+  // Check if the email and password exist in the database
+  try {
+    const user = await admin.findOne({ email: email });
+    if (!user) {
+      emailError = 'Email or password is incorrect';
+      return res.render('admin-login', { emailError });
+    }
+
+    if (password!=user.password) {
       passwordError = 'Email or password is incorrect';
-      return res.render('login', { passwordError });
+      return res.render('admin-login', { passwordError });
     }
   } catch (error) {
     console.error(error);
@@ -88,9 +157,10 @@ app.post('/login', async (req, res) => {
     return res.status(500).send('Internal Server Error');
   }
 
-  // Redirect to the home page on successful login
-  res.redirect('/home');
+  res.redirect('/admin');
 });
+
+
 
 app.post('/signin', async (req, res) => {
   const { email, password } = req.body;
@@ -122,25 +192,47 @@ app.post('/signin', async (req, res) => {
       return res.render('signin', { emailError });
     }
 
-    // Hash the password before saving it to the database
-    const hashedPassword = await bcrypt.hash(password, 10); // Use bcrypt for hashing
-    const newUser = new User({ email: email, password: hashedPassword });
+    // Store the extracted username in the session
+    const username = (email.split('@')[0]).toUpperCase();
+
+    // password before saving it to the database
+    const newUser = new User({ email: email, password: password });
     await newUser.save();
+
+    // Set the session variable before redirecting
+    req.session.username = username;
+    
+    // Redirect to the home page on successful sign-in
+    return res.redirect('/home');
   } catch (error) {
     console.error(error);
     // Handle database error
-    return res.status(500).send('Internal Server Error');
+    return res.status(500).send('Server Error');
   }
-
-  // Redirect to the home page on successful sign-in
-  res.redirect('/home');
 });
 
-app.get('/home', (req, res) => {
-  res.render('home');
+
+
+app.get('/home', async (req, res) => {
+  try {
+    // Check if the user is logged in by looking for user data in the session
+    if (!req.session.user) {
+      return res.redirect('/'); // Redirect to the login page if the user is not logged in
+    }
+
+    // Retrieve the user information from the session
+    const user = req.session.user;
+
+    // Render the EJS template and pass the username from the session to the template
+    res.render('home', { username: user.username });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error fetching user data');
+  }
 });
+
+
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
-
