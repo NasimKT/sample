@@ -33,9 +33,13 @@ const UserSchema = new mongoose.Schema({
   email: String,
   password: String,
 });
+const AdminSchema = new mongoose.Schema({
+  email: String,
+  password: String,
+});
 //accessing collection from db
 const User = mongoose.model('users', UserSchema);
-var admin = mongoose.model('admin', UserSchema);
+const admin = mongoose.model('admin', AdminSchema);
 //setting up view-engine
 app.set('view engine', 'ejs');
 app.use(express.static('public'));
@@ -141,13 +145,13 @@ app.post('/admin-login', async (req, res) => {
 
   // Check if the email and password exist in the database
   try {
-    const user = await admin.findOne({ email: email });
-    if (!user) {
+    const user1 = await admin.findOne({ email: email });
+    if (!user1) {
       emailError = 'Email or password is incorrect';
       return res.render('admin-login', { emailError });
     }
 
-    if (password!=user.password) {
+    if (password!=user1.password) {
       passwordError = 'Email or password is incorrect';
       return res.render('admin-login', { passwordError });
     }
@@ -160,6 +164,71 @@ app.post('/admin-login', async (req, res) => {
   res.redirect('/admin');
 });
 
+app.post('/search', async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    // Query the database to search for users with a matching email
+    const user = await User.find({ email: email });
+
+    // Render a page with the search results
+    res.render('admin', { user });
+  } catch (error) {
+    console.error(error);
+    // Handle database error
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+
+app.post('/delete/:id', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    // Find the user by ID and remove it from the database
+    const deletedUser = await User.findByIdAndRemove(userId);
+
+    if (!deletedUser) {
+      // User not found
+      return res.status(404).send('User not found');
+    }
+
+    // Redirect to a success page or refresh the user list
+    res.redirect('/admin'); // You can change this to an appropriate page
+  } catch (error) {
+    console.error(error);
+    // Handle database error
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+app.post('/update/:id', async (req, res) => {
+  const userId = req.params.id;
+  const { email, password } = req.body;
+
+  try {
+    // Find the user by ID
+    const user = await User.findById(userId);
+
+    if (!user) {
+      // User not found
+      return res.status(404).send('User not found');
+    }
+
+    // Update user details
+    user.email = email;
+    user.password = password; // Make sure to hash the new password before saving
+
+    await user.save();
+
+    // Redirect to a success page or back to the user list
+    res.redirect('/admin'); // You can change this to an appropriate page
+  } catch (error) {
+    console.error(error);
+    // Handle database error
+    res.status(500).send('Internal Server Error');
+  }
+});
 
 
 app.post('/signin', async (req, res) => {
